@@ -14,9 +14,9 @@
 # Before running this script make sure you have the following dependencies in place!
 # 1. You have a Jamf Pro Admin user account and password
 # 2. The Jamf Setup app needs to already exist as an app record in Jamf Pro under Devices/Mobile Device Apps
-# 3. The name you would like to give the extension attribute that determines the laodout for a device
+# 3. The name you would like to give the extension attribute that determines the loadout for a device
 # 4. All of the options you would like for different possible loadouts
-# 5. The hexidecimal color codes for what you would like to be the background, text, and border colors. 
+# 5. The hexadecimal color codes for what you would like to be the background, text, and border colors. 
 # 		You will also be able to choose from a color picker if you don't know the options (optional)
 # 6. The URL of a hosted image to display when the app opens (optional)
 # 7. Any messaging you would like to change (optional)
@@ -61,7 +61,7 @@
 ###################################################
 
 #Do not manually edit these
-JSCVersion="Jamf Setup Constructor V1.2"
+JSCVersion="Jamf Setup Constructor V1.3"
 jamfProURL=
 initialAnswer=
 adminUser=
@@ -109,10 +109,12 @@ siteArray=()
 siteList=""
 site=
 sgIDarray=()
+createDeconstructor="Yes"
+duplicateAppRecordCreated=0
 
 #Functions:
 
-#Function to convert RGB value to Hexidecimal
+#Function to convert RGB value to Hexadecimal
 function getHex() {
 	#Remove the commas from the RGB value
 	RGB=$(echo $1 | tr -d ,)
@@ -126,18 +128,18 @@ function getHex() {
 	B=$(echo $(($B/256)))
 	echo "$R $G $B"
 	
-	#Convert the RGB value to a Hexidecimal value
+	#Convert the RGB value to a Hexadecimal value
 	# NOTE: due to the calculations, this value may be off by the tiniest fraction of a decimal, but the resulting
 	# color will be virutally indinctual from the naked eye
 	hexColor=$(ruby -pae '$_=?#+"%02X"*3%$F' <<< "$R $G $B")
 }
 
-#Function to convert Hexidecimal to RGB
+#Function to convert Hexadecimal to RGB
 function getRGB() {
 	#take off the pound sign at the front
 	hex=$(echo "${1}" | sed 's/#//g')
 
-	#split up the three sections of the hexidecimal
+	#split up the three sections of the Hexadecimal
 	a=$(echo $hex | cut -c-2)
 	b=$(echo $hex | cut -c3-4)
 	c=$(echo $hex | cut -c5-6)
@@ -178,6 +180,13 @@ function rollback() {
 	#Delete the extension attribute if it exists
 	curl -su $adminUser:$adminPass $jamfProURL/JSSResource/mobiledeviceextensionattributes/id/$EAidFormatted -X DELETE
 	echo "$(date) Extension attribute has been deleted..." >> $logPath
+	
+	#If sites are configured, delete the duplicate app record created in the new site
+	if [[ "$currentSite" != "$site" ]] && [[ "$duplicateAppRecordCreated" == 1 ]]; then
+			#Delete the duplicate app record
+			curl -su $adminUser:$adminPass $jamfProURL/JSSResource/mobiledeviceapplications/id/$jamfSetupID -X DELETE
+			echo "$(date) Duplicate app record with ID $jamfSetupID deleted..." >> $logPath
+		fi
 }
 
 #Optional Variable Defaults
@@ -206,19 +215,21 @@ echo "################################
 echo $(date) "Jamf Setup Constructor initiated, prompting user to make sure dependencies are in place..." >> $logPath
 
 initialAnswer=$(osascript << EOF
+with timeout of 60000 seconds
 tell application "System Events" to button returned of (display dialog "Welcome to The Jamf Setup Constructor!
 _______________________________________
 
 BEFORE PROCEEDING, YOU WILL NEED:
  1. You have a Jamf Pro Admin user account and password
  2. The Jamf Setup app needs to already exist as an app record in Jamf Pro under Devices/Mobile Device Apps
- 3. The name you would like to give the extension attribute that determines the laodout for a device
+ 3. The name you would like to give the extension attribute that determines the loadout for a device
  4. All of the options you would like for different possible loadouts
- 5. If you would like to change the color scheme of the Jamf Setup app, you will need to know which colors you want to use. If you do not know the hexidecimal color code of the color you want, you will have the ability to choose from a color picker as well.(optional)
+ 5. If you would like to change the color scheme of the Jamf Setup app, you will need to know which colors you want to use. If you do not know the hexadecimal color code of the color you want, you will have the ability to choose from a color picker as well.(optional)
  6. The URL of a hosted image to display when the app opens (optional)
  7. Any messaging you would like to change (optional)
 
 If you do not have these items necessary, hit Quit and gather them before proceeding." with title "$JSCVersion" with icon caution buttons {"Quit", "Proceed"} default button 2)
+end timeout
 EOF
 )
 
@@ -230,7 +241,9 @@ if [[ $initialAnswer == "Quit" ]]; then
 
 #Prompt the user for the URL of their Jamf Pro server
 jamfProURL=$(osascript << EOF
+with timeout of 60000 seconds
 tell application "System Events" to text returned of (display dialog "Please enter the URL of your Jamf Pro server" default answer "ex. https://my.jamf.pro" with title "$JSCVersion" buttons {"OK"} default button 1)
+end timeout
 EOF
 )
 echo $(date) "Jamf Pro Server: $jamfProURL" >> $logPath
@@ -250,14 +263,18 @@ echo "
 #
 # After proceeding, first prompt the user to enter admin credentials for their Jamf Pro server
 adminUser=$(osascript << EOF
+with timeout of 60000 seconds
 tell application "System Events" to text returned of (display dialog "Please enter the username of an ADMIN for your Jamf Pro server at $jamfProURL" default answer "" with title "$JSCVersion" buttons {"OK"} default button 1)
+end timeout
 EOF
 )
 echo $(date) "Jamf Pro admin account to be used: $adminUser" >> $logPath
 
 # Prompt for their admin password with hidden input
 adminPass=$(osascript << EOF
+with timeout of 60000 seconds
 tell application "System Events" to text returned of (display dialog "Please enter the password for admin user $adminUser for your Jamf Pro server at $jamfProURL" default answer "" with title "$JSCVersion" buttons {"OK"} default button 1 with hidden answer)
+end timeout
 EOF
 )
 
@@ -287,6 +304,7 @@ if [[ $adminPrivileges == *"Read Mobile Device Applications"* ]] && [[ $adminPri
 	pkill jamfHelper
 
 	osascript << EOF
+	with timeout of 60000 seconds
 	tell application "System Events" to display dialog "Your admin account does not have the correct privileges. Please log into Jamf Pro and give the account the following permissions:
 
 	-CREATE/READ/UPDATE on Jamf Pro User Accounts and Groups
@@ -294,6 +312,7 @@ if [[ $adminPrivileges == *"Read Mobile Device Applications"* ]] && [[ $adminPri
 	-READ on Sites
 	-CREATE/DELETE on Mobile Device Extension Attributes
 	-CREATE/DELETE on Smart Mobile Device Groups" with title "$JSCVersion" buttons {"OK"} default button 1
+	end timeout
 EOF
 	exit 0
 	fi
@@ -386,11 +405,13 @@ pkill jamfHelper
 
 #Prompt the user to ask them if they would like to use the randomly generated password or enter their own password
 passwordOption=$(osascript << EOF
+with timeout of 60000 seconds
 tell application "System Events" to button returned of (display dialog "JSC has created a special API account for the Jamf Setup app to use in order for the app to actually be able to change the loadout of the devices. For security reasons, you will need to manually enter the password in the Jamf Pro GUI at 
 
 Settings/Jamf Pro User Accounts and Groups/$setupUser
 
-To randomly generate a 25 character alphanumeric password, click the Copy to Clipbaord button below. To specify your own password, click Manually Enter Password. Once you select an option, a browser window will automatically be opened to the EDIT page of the $setupUser account within Jamf Pro." with title "$JSCVersion" buttons {"Copy to Clipboard","Manually Enter Password"} default button 1)
+To randomly generate a 25 character alphanumeric password, click the Copy to Clipboard button below. To specify your own password, click Manually Enter Password. Once you select an option, a browser window will automatically be opened to the EDIT page of the $setupUser account within Jamf Pro." with title "$JSCVersion" buttons {"Copy to Clipboard","Manually Enter Password"} default button 1)
+end timeout
 EOF
 )
 echo $(date) "User has selected $passwordOption..." >> $logPath
@@ -406,6 +427,7 @@ if [[ $passwordOption == "Copy to Clipboard" ]]; then
 	#Open jamf pro to the Jamf Setup user account and edit so they can easily paste the password
 	open "$jamfProURL/accounts.html?id=$accountID&o=u"
 	osascript << EOF
+	with timeout of 60000 seconds
 tell application "System Events" to display dialog "STOP!
 
 The password has been copied to your clipboard. At this moment, a browser should have automatically opened to take you to the account page for the $setupUser user. If you weren't already logged in, do so and the page should already be in EDIT mode. Paste the password into both of the password fields on that user account and click SAVE.
@@ -413,6 +435,7 @@ The password has been copied to your clipboard. At this moment, a browser should
 When you have SAVED and finished, click TEST below.
 
 (If you accidentally lost what was on your clipboard, just hit TEST anyway, when it fails it will re-copy the password to your clipboard and prompt you to test again.)" with title "$JSCVersion" buttons {"TEST"} default button 1
+end timeout
 EOF
 	
 	#test out the credentials with a simple read API call to make sure it can authenticate
@@ -430,6 +453,7 @@ EOF
 		echo $setupPass | pbcopy
 		open "$jamfProURL/accounts.html?id=$accountID&o=u"
 		osascript << EOF
+		with timeout of 60000 seconds
 tell application "System Events" to display dialog "Authentication Failed 
 		
 The password has been copied to your clipboard again. At this moment, pause for a second and go log into Jamf Pro (the web page should have automatically reopened to the account again. If it did not, go into Settings/Jamf Pro User Accounts and Groups and find the $setupUser user that was created. When you edit that user, paste the password into both of the password fields on that user account.
@@ -437,6 +461,7 @@ The password has been copied to your clipboard again. At this moment, pause for 
 When you have SAVED and finished, click TEST below.
 
 (If you accidentally lost what was on your clipboard, just hit TEST anyway, when it fails it will re-copy the password and prompt you to test again.)" with title "$JSCVersion" buttons {"TEST"} default button 1
+end timeout
 EOF
 		
 		#test out the credentials with a simple read API call to make sure it can authenticate
@@ -455,10 +480,12 @@ EOF
 		open "$jamfProURL/accounts.html?id=$accountID&o=u"
 		#Prompt the user to enter a password, update the account in Jamf Pro and then hit test to test it out
 	setupPass=$(osascript << EOF
+	with timeout of 60000 seconds
 tell application "System Events" to text returned of (display dialog "STOP
 A browser window should have automatically opened to Jamf Pro, if you're not logged in then do so and it should bring you right to the $setupUser account in EDIT mode. Set the password for that account how you want it. 
 	
 Make sure to SAVE and then return to this dialog and enter the password you used in the box below and hit TEST." default answer "ENTER PASSWORD HERE" with title "$JSCVersion" buttons {"TEST"} default button 1 with hidden answer)
+end timeout
 EOF
 )
 		
@@ -475,11 +502,13 @@ EOF
 				
 			while [[ $setupTest != "Successful" ]]; do
 				setupPass=$(osascript << EOF
+				with timeout of 60000 seconds
 				tell application "System Events" to text returned of (display dialog "Authentication Failed
 
 FIRST log into Jamf Pro and go to Settings/Jamf Pro User Accounts and Groups and select the account $setupUser and set the password for that account how you want it. 
 
 SAVE and then return to this dialog and enter the password in the box below and hit TEST." default answer "ENTER PASSWORD HERE" with title "$JSCVersion" buttons {"TEST"} default button 1 with hidden answer)
+end timeout
 EOF
 )
 				
@@ -506,11 +535,11 @@ if [[ $jamfSetupID > 0 ]] && [[ $jamfSetupID < 99999999999999 ]]; then
 		echo $(date) "Error: $jamfSetupID
 		exiting..." >> $logPath
 		osascript << EOF
+		with timeout of 60000 seconds
 		tell application "System Events" to display dialog "There was an error attempting to verify the Jamf Setup app exists in your Mobile Device Apps section of Jamf Pro.
 		
-		Error: $jamfSetupID
-		
-		The script will now exit." with title "$JSCVersion" buttons {"OK"} default button 1
+		View the logs for more details. The script will now exit." with title "$JSCVersion" buttons {"OK"} default button 1
+		end timeout
 EOF
 		exit 0
 		fi
@@ -558,8 +587,10 @@ case $siteCount in
 	
 	#Prompt user to select a site from the list
 	site=$(osascript << EOF
+	with timeout of 60000 seconds
 	tell application "System Events" to activate
 	tell application "System Events" to choose from list {$siteList} with prompt "It looks like your Jamf Pro server has sites configured. You can assign the Jamf Setup app and the Smart Groups that this script will create to a specific site or leave them unassigned. Which site would you like to configure these in? (If you don't want them associated with a site, just hit cancel to continue on with the script)"
+	end timeout
 EOF
 )
 	if [[ "$site" == "false" ]]; then
@@ -579,7 +610,9 @@ echo $(date) "Preliminary information gathered. Continuing on with Extension Att
 
 #Prompt the user to name the Extension Attribute that will be created
 EAName=$(osascript << EOF
+with timeout of 60000 seconds
 tell application "System Events" to text returned of (display dialog "Constructor will need to create a Mobile Device Extension Attribute in Jamf Pro to use to determine which loadout a device should get. What would you like to name this Extension Attribute? (ex. Loadout, Subdepartment, Role, etc.)" default answer "Loadout" with title "$JSCVersion" buttons {"OK"} default button 1)
+end timeout
 EOF
 )
 
@@ -587,11 +620,13 @@ echo $(date) "User entered $EAName as the name for the extension attribute." >> 
 
 #Have the user verify the name
 EANameVerification=$(osascript << EOF
+with timeout of 60000 seconds
 tell application "System Events" to button returned of (display dialog "You have chosen to name your Mobile Device Extension Attribute:
 
 $EAName
 
 Is this correct?" with title "$JSCVersion" buttons {"Yes", "No, Rename..."} default button 1)
+end timeout
 EOF
 )
 echo $(date) "Requesting user verify entry..." >> $logPath
@@ -602,18 +637,22 @@ while [[ $EANameVerification != "Yes" ]]; do
 	#Rename the EAName variable
 	echo $(date) "User requested to re-enter the name" >> $logPath
 	EAName=$(osascript << EOF
+	with timeout of 60000 seconds
 	tell application "System Events" to text returned of (display dialog "Re-enter the name for the Extension Attribute (ex. Loadout, Subdepartment, Role, etc.)" default answer "$EAName" with title "$JSCVersion" buttons {"OK"} default button 1)
+	end timeout
 EOF
 	)
 	
 	#Have the user verify the name
 	echo $(date) "Requesting user verify re-entry..." >> $logPath
 	EANameVerification=$(osascript << EOF
+	with timeout of 60000 seconds
 	tell application "System Events" to button returned of (display dialog "You have chosen to name your Mobile Device Extension Attribute:
 
 $EAName
 
 Is this correct?" with title "$JSCVersion" buttons {"Yes", "No, Rename..."} default button 1)
+end timeout
 EOF
 )
 	done
@@ -621,9 +660,11 @@ echo $(date) "Extension Attribute successfully named $EAName" >> $logPath
 
 #Explain to the user what the next step will entail for creating options for the Extension Attribute Dropdown
 osascript << EOF
+with timeout of 60000 seconds
 tell application "System Events" to (display dialog "Next we will create options for your $EAName Extension Attribute. These will be the options that are displayed on the Jamf Setup screen for a user to choose from to decide what kind of loadout the device should receive. 
 
 You will be prompted to add as many options as you would like and once you are finished we will proceed with the optional steps." with title "$JSCVersion" buttons {"OK"} default button 1)
+end timeout
 EOF
 
 echo $(date) "Requesting user enter options for the Extension Attribute and verify their entries..." >> $logPath
@@ -632,17 +673,21 @@ while [[ $EAOptionIndex != 0 ]]; do
 	
 	#Prompt the user to enter the name of the EA Option to create
 	EAOptionName=$(osascript << EOF
+	with timeout of 60000 seconds
 	tell application "System Events" to text returned of (display dialog "Please enter the name for Option $EAOptionIndex of your $EAName Extension Attribute" default answer "" with title "$JSCVersion" buttons {"OK"} default button 1)
+	end timeout
 EOF
 )
 	
 	#Have user verify their entry
 	EAOptionVerification=$(osascript << EOF
+	with timeout of 60000 seconds
 	tell application "System Events" to button returned of (display dialog "You entered:
 
 $EAOptionName
 
 Is this correct?" with title "$JSCVersion" buttons {"Yes", "No, try again..."} default button 1)
+end timeout
 EOF
 )
 	
@@ -651,17 +696,21 @@ EOF
 		
 		#Rename the Option
 		EAOptionName=$(osascript << EOF
+		with timeout of 60000 seconds
 		tell application "System Events" to text returned of (display dialog "Please enter the name for Option $EAOptionIndex of your $EAName Extension Attribute" default answer "" with title "$JSCVersion" buttons {"OK"} default button 1)
+		end timeout
 EOF
 )
 		
 		#Have user verify their entry
 		EAOptionVerification=$(osascript << EOF
+		with timeout of 60000 seconds
 		tell application "System Events" to button returned of (display dialog "You entered:
 
 $EAOptionName
 
 Is this correct?" with title "$JSCVersion" buttons {"Yes", "No, try again..."} default button 1)
+end timeout
 EOF
 )
 		done
@@ -672,7 +721,9 @@ EOF
 	
 	#Ask the user if they have more options to enter
 	EAOptionCreateAnother=$(osascript << EOF
+	with timeout of 60000 seconds
 	tell application "System Events" to button returned of (display dialog "Option created! Would you like to create another option?" with title "$JSCVersion" buttons {"Yes", "No"} default button 1)
+	end timeout
 EOF
 )
 	
@@ -703,11 +754,13 @@ for i in $(seq 0 $EAindex); do
 
 #Display the message before moving on so the user can see what they've gotten set to be created so far
 osascript << EOF
+with timeout of 60000 seconds
 tell application "System Events" to display dialog "Brilliant!
 
 $EAConfirmationMessage
 
 NOTE: Nothing has been created in Jamf Pro so far, please proceed to finish Construction." with title "$JSCVersion" buttons {"Proceed"} default button 1
+end timeout
 EOF
 
 echo $(date) "$EAConfirmationMessage
@@ -724,11 +777,12 @@ echo $(date) "Extension attribute section completed. Starting Optional Configura
 #Even if options are skipped and defaults are kept, they can still change these options later in the App Config itself
 
 optionChoice=$(osascript << EOF
+with timeout of 60000 seconds
 tell application "System Events" to button returned of (display dialog "Next we will set up some optional configurations. All of these can be left to their defaults if you desire and later they can be changed in the App Configuration tab of the Jamf Setup mobile device app record within Jamf Pro. 
 
 Here are the optional configurations and what they are currently set to:
 
--BackGround Color: $backgroundColor
+-Background Color: $backgroundColor
 -Page Text Color: $pageTextColor
 -Button Color: $buttonColor
 -Button Text Color: $buttonTextColor
@@ -741,6 +795,7 @@ Here are the optional configurations and what they are currently set to:
 
 If you want to keep these settings for now or change them at a later time, click Keep Settings.
 If you want to make changes to these now, select Change." buttons {"Keep Settings", "Change"} default button 2)
+end timeout
 EOF
 )
 if [[ "$optionChoice" == "Keep Settings" ]]; then
@@ -754,21 +809,27 @@ while [[ $optionalVerification != "Continue" ]]; do
 	
 ######### BACKGROUND COLOR
 	buttonReturned=$(osascript << EOF
-	tell application "System Events" to button returned of (display dialog "If you know the hexidecimal format of the BACKGROUND color you want (ex. #F8F8F8) click Enter Color Code or click Choose Color to pick a color from the color picker." with title "Background Color" buttons {"Enter Color Code", "Choose Color"} default button 2)
+	with timeout of 60000 seconds
+	tell application "System Events" to button returned of (display dialog "If you know the hexadecimal format of the BACKGROUND color you want (ex. #F8F8F8) click Enter Color Code or click Choose Color to pick a color from the color picker." with title "Background Color" buttons {"Enter Color Code", "Choose Color"} default button 2)
+	end timeout
 EOF
 	)
 	case $buttonReturned in
 		"Enter Color Code")
 		backgroundColor=$(osascript << EOF
+		with timeout of 60000 seconds
 		tell application "System Events" to text returned of (display dialog "Background Color" default answer "$backgroundColor" buttons {"NEXT"} default button 1)
+		end timeout
 EOF
 	)
 		;;
 		"Choose Color")
 		defaultColor=$(getRGB "$backgroundColor")
 		RGBcolor=$(osascript << EOF
+		with timeout of 60000 seconds
 		tell application "System Events" to activate
 		tell application "System Events" to choose color default color {$defaultColor}
+		end timeout
 EOF
 		)
 		getHex "$RGBcolor"
@@ -778,21 +839,27 @@ EOF
 	
 ######## PAGE TEXT COLOR
 	buttonReturned=$(osascript << EOF
-	tell application "System Events" to button returned of (display dialog "If you know the hexidecimal format of the PAGE TEXT color you want (ex. #F8F8F8) click Enter Color Code or click Choose Color to pick a color from the color picker." with title "Page Text Color" buttons {"Enter Color Code", "Choose Color"} default button 2)
+	with timeout of 60000 seconds
+	tell application "System Events" to button returned of (display dialog "If you know the hexadecimal format of the PAGE TEXT color you want (ex. #F8F8F8) click Enter Color Code or click Choose Color to pick a color from the color picker." with title "Page Text Color" buttons {"Enter Color Code", "Choose Color"} default button 2)
+	end timeout
 EOF
 	)
 	case $buttonReturned in
 		"Enter Color Code")
 		pageTextColor=$(osascript << EOF
+		with timeout of 60000 seconds
 		tell application "System Events" to text returned of (display dialog "Page Text Color" default answer "$pageTextColor" buttons {"NEXT"} default button 1)
+		end timeout
 EOF
 	)
 		;;
 		"Choose Color")
 		defaultColor=$(getRGB "$pageTextColor")
 		RGBcolor=$(osascript << EOF
+		with timeout of 60000 seconds
 		tell application "System Events" to activate
 		tell application "System Events" to choose color default color {$defaultColor}
+		end timeout
 EOF
 		)
 		getHex "$RGBcolor"
@@ -802,21 +869,27 @@ EOF
 	
 ######## BUTTON COLOR
 buttonReturned=$(osascript << EOF
-	tell application "System Events" to button returned of (display dialog "If you know the hexidecimal format of the SUBMIT BUTTON color you want (ex. #F8F8F8) click Enter Color Code or click Choose Color to pick a color from the color picker." with title "Submit Button Color" buttons {"Enter Color Code", "Choose Color"} default button 2)
+with timeout of 60000 seconds
+	tell application "System Events" to button returned of (display dialog "If you know the hexadecimal format of the SUBMIT BUTTON color you want (ex. #F8F8F8) click Enter Color Code or click Choose Color to pick a color from the color picker." with title "Submit Button Color" buttons {"Enter Color Code", "Choose Color"} default button 2)
+	end timeout
 EOF
 	)
 	case $buttonReturned in
 		"Enter Color Code")
 		buttonColor=$(osascript << EOF
+		with timeout of 60000 seconds
 		tell application "System Events" to text returned of (display dialog "Button Color" default answer "$buttonColor" buttons {"NEXT"} default button 1)
+		end timeout
 EOF
 	)
 		;;
 		"Choose Color")
 		defaultColor=$(getRGB "$buttonColor")
 		RGBcolor=$(osascript << EOF
+		with timeout of 60000 seconds
 		tell application "System Events" to activate
 		tell application "System Events" to choose color default color {$defaultColor}
+		end timeout
 EOF
 		)
 		getHex "$RGBcolor"
@@ -826,21 +899,27 @@ EOF
 
 ######## BUTTON TEXT COLOR
 buttonReturned=$(osascript << EOF
-	tell application "System Events" to button returned of (display dialog "If you know the hexidecimal format of the SUBMIT BUTTON TEXT color you want (ex. #F8F8F8) click Enter Color Code or click Choose Color to pick a color from the color picker." with title "Submit Button Text Color" buttons {"Enter Color Code", "Choose Color"} default button 2)
+with timeout of 60000 seconds
+	tell application "System Events" to button returned of (display dialog "If you know the hexadecimal format of the SUBMIT BUTTON TEXT color you want (ex. #F8F8F8) click Enter Color Code or click Choose Color to pick a color from the color picker." with title "Submit Button Text Color" buttons {"Enter Color Code", "Choose Color"} default button 2)
+	end timeout
 EOF
 	)
 	case $buttonReturned in
 		"Enter Color Code")
 		buttonTextColor=$(osascript << EOF
+		with timeout of 60000 seconds
 		tell application "System Events" to text returned of (display dialog "Submit Button Text Color" default answer "$buttonTextColor" buttons {"NEXT"} default button 1)
+		end timeout
 EOF
 	)
 		;;
 		"Choose Color")
 		defaultColor=$(getRGB "$buttonTextColor")
 		RGBcolor=$(osascript << EOF
+		with timeout of 60000 seconds
 		tell application "System Events" to activate
 		tell application "System Events" to choose color default color {$defaultColor}
+		end timeout
 EOF
 		)
 		getHex "$RGBcolor"
@@ -850,33 +929,46 @@ EOF
 	
 ######## TEXT
 	headerLogoURL=$(osascript << EOF
+	with timeout of 60000 seconds
 	tell application "System Events" to text returned of (display dialog "URL of Hosted Image to be used as logo on the main page" default answer "$headerLogoURL" buttons {"NEXT"} default button 1)
+	end timeout
 EOF
 )
 	mainPageTitle=$(osascript << EOF
+	with timeout of 60000 seconds
 	tell application "System Events" to text returned of (display dialog "Main Page Title Text" default answer "$mainPageTitle" buttons {"NEXT"} default button 1)
+	end timeout
 EOF
 )
 	mainPageBody=$(osascript << EOF
+	with timeout of 60000 seconds
 	tell application "System Events" to text returned of (display dialog "Main Page Body Text" default answer "$mainPageBody" buttons {"NEXT"} default button 1)
+	end timeout
 EOF
 )
 	buttonText=$(osascript << EOF
+	with timeout of 60000 seconds
 	tell application "System Events" to text returned of (display dialog "Button Text" default answer "$buttonText" buttons {"NEXT"} default button 1)
+	end timeout
 EOF
 )
 	successPageTitle=$(osascript << EOF
+	with timeout of 60000 seconds
 	tell application "System Events" to text returned of (display dialog "Success Page Title Text" default answer "$successPageTitle" buttons {"NEXT"} default button 1)
+	end timeout
 EOF
 )
 	successPageBody=$(osascript << EOF
+	with timeout of 60000 seconds
 	tell application "System Events" to text returned of (display dialog "Success Page Body Text" default answer "$successPageBody" buttons {"NEXT"} default button 1)
+	end timeout
 EOF
 )
 	optionalVerification=$(osascript << EOF
+	with timeout of 60000 seconds
 	tell application "System Events" to button returned of (display dialog "Here are the options you have set, please double check!
 	
--BackGround Color: $backgroundColor
+-Background Color: $backgroundColor
 -Page Text Color: $pageTextColor
 -Button Color: $buttonColor
 -Button Text Color: $buttonTextColor
@@ -889,6 +981,7 @@ EOF
 	
 If these look correct, hit Continue.
 If you need to make a change, hit Start Over." buttons {"Continue", "Start Over"} default button 1)
+end timeout
 EOF
 )
 	done
@@ -896,7 +989,7 @@ EOF
 
 #Report back to logs the details of the options chosen or the default options
 echo $(date) "Jamf Setup will be formatted with the following options:
--BackGround Color: '"$backgroundColor"'
+-Background Color: '"$backgroundColor"'
 -Page Text Color: '"$pageTextColor"'
 -Button Color: '"$buttonColor"'
 -Button Text Color: '"$buttonTextColor"'
@@ -916,6 +1009,7 @@ Initiating Smart Group Section
 
 #Have the user select whether or not they want an extra smart group created for Newly Assigned Devices 
 smartGroupChoice=$(osascript << EOF
+with timeout of 60000 seconds
 tell application "System Events" to button returned of (display dialog "Smart Groups
 
 Scoping with the use of Jamf Setup requires Smart Mobile Device Groups to be created for each one of the loadout options that can be selected in your Extension Attribute. Constructor will create these smart groups for you with one of two options:
@@ -927,6 +1021,7 @@ OPTION 2: Only include smart groups for the different options
 -This option is if you do not plan on having an out of box experience with Jamf Setup, and just want smart groups based on the extension attribute value.
 
 Which Option Would You Prefer?" with title "$JSCVersion" buttons {"Option 1", "Option 2"} default button 1)
+end timeout
 EOF
 )
 
@@ -952,6 +1047,24 @@ for i in $(seq 0 $EAindex); do
 done
 
 echo $(date) "Smart group section completed.
+
+################################
+# JAMF SETUP DECONSTRUCTOR
+################################" >> $logPath
+
+#This script can build an optional script on the user's desktop that can be used to delete everything that is made after a successful run.
+#This can be handy in case the user decides they want to start over or if they're just testing or creating demo environments
+
+createDeconstructor=$(osascript << EOF
+with timeout of 60000 seconds
+tell application "System Events" to button returned of (display dialog "DE-Constructor Script:
+After a successful run, we can create a script on your desktop that can be used to DELETE everything that gets created today. This can be especially useful if you're only testing or creating demo enviroments that you want to nuke later and will make it easy to do so. Would you like this script to be created?" with title "$JSCVersion" buttons {"Yes", "No"} default button 1)
+end timeout
+EOF
+)
+
+echo $(date) "Create Jamf Setup DE-Constructor script? $createDeconstructor
+DeConstructor section completed.
 
 ################################
 # FINAL USER CONFIRMATION
@@ -990,7 +1103,7 @@ A total of $numberOfSmartGroups smart mobile device groups will be created with 
 	
 #Add smart group names to message
 for i in $(seq 0 $smartGroupIndex); do
-	finalMessage="$finalMessage
+	finalMessage="$finalMessage 
 	${smartGroupNameArray[$i]}"
 	done
 	
@@ -998,6 +1111,7 @@ for i in $(seq 0 $smartGroupIndex); do
 if [[ $smartGroupChoice == "Option 1" ]]; then
 	finalMessage="$finalMessage
 	JSC_Newly Enrolled Devices"
+	smartGroupNameArray+=( "JSC_Newly Enrolled Devices" )
 	fi
 
 #If they changed the default optional values, display those as well
@@ -1005,17 +1119,8 @@ if [[ $optionChoice == "Change" ]]; then
 	finalMessage="$finalMessage
 	
 OPTIONAL CHANGES
-The following optional values have been changed from their defaults:
--BackGround Color: $backgroundColor
--Page Text Color: $pageTextColor
--Button Color: $buttonColor
--Button Text Color: $buttonTextColor
--Main Page Header Image URL: $headerLogoURL
--Main Page Title: $mainPageTitle
--Main Page Body: $mainPageBody
--Button Text: $buttonText
--Success Page Title: $successPageTitle
--Success Page Body: $successPageBody"
+You chose to change the defaults for the optional values.
+These can be changed later within the App Configuration tab of the Jamf Setup Mobile Device App record."
 	else
 		finalMessage="$finalMessage
 		
@@ -1027,12 +1132,14 @@ fi
 #Finish message
 finalMessage="$finalMessage
 
-If these settings all look correct, hit PROCEED to initiate construction.
-If these settings look wrong in any way, hit ABORT to cancel."
+If these settings all look correct, hit Proceed to initiate construction.
+If these settings look wrong in any way, hit Cancel to cancel."
 
 #Display message to user
 finalMessageChoice=$(osascript << EOF
-tell application "System Events" to button returned of (display dialog "$finalMessage" buttons {"PROCEED", "ABORT"} with title "$JSCVersion" default button 1)
+with timeout of 60000 seconds
+tell application "System Events" to button returned of (display dialog "$finalMessage" buttons {"Proceed", "Cancel"} with title "$JSCVersion" default button 1)
+end timeout
 EOF
 )
 
@@ -1045,9 +1152,11 @@ $finalMessage
 if [[ $finalMessageChoice == "ABORT" ]]; then
 	echo $(date) "User chose to abort session" >> $logPath
 	closingSelection=$(osascript << EOF
+	with timeout of 60000 seconds
 	tell application "System Events" to button returned of (display dialog "Session cancelled manually.
 	
 	Click View Logs to view more information." with title "$JSCVersion" buttons {"Close", "View Logs"} default button 1)
+	end timeout
 EOF
 )
 
@@ -1097,11 +1206,11 @@ if [[ $EAidFormatted > 0 ]] && [[ $EAidFormatted < 999999999 ]]; then
 		echo "Due to error, script will now exit" >> $logPath
 		
 		closingSelection=$(osascript << EOF
+		with timeout of 60000 seconds
 		tell application "System Events" to button returned of (display dialog "Due to an error the script has been cancelled.
 		
-		Error: $EAid
-		
 		Click View Logs to view more information." with title "$JSCVersion" buttons {"Close","View Logs"} default button 1)
+		end timeout
 EOF
 )
 
@@ -1143,8 +1252,6 @@ if [[ $smartGroupChoice == "Option 1" ]]; then
 	done
 	
 	echo $(date) "Adding extra smart group since Option 1 was selected..." >> $logPath
-	#Add the name of the new smart group to the end of the array
-	smartGroupNameArray+=( "JSC_Newly Enrolled Devices" )
 	
 	#Once all of the criteria is added to the XML, add the whole thing to the end of the Smart Group XML array
 	#Create a variable to pinpoint the next open priority slot
@@ -1174,11 +1281,11 @@ for i in $(seq 0 $smartGroupXMLindex); do
 			rollback
 			
 			closingSelection=$(osascript << EOF
+			with timeout of 60000 seconds
 			tell application "System Events" to button returned of (display dialog "Due to an error the script has been cancelled. Anything that has already been created will be deleted.
 			
-			Error: $SGid
-			
-			Click View Logs to view more information." with title "$JSCVersion" buttons {"Close","View Logs"} default button 1)
+			Click View Logs to view more information" with title "$JSCVersion" buttons {"Close","View Logs"} default button 2)
+			end timeout
 EOF
 )
 
@@ -1221,6 +1328,7 @@ This is to prevent breaking any currently scoped workflows that may already exis
 		#create a duplicate app record in the new site and use the ID of the newly created app record going forward
 		jamfSetupID=$(curl -su $adminUser:$adminPass $jamfProURL/JSSResource/mobiledeviceapplications/id/0 -H "Content-type: text/xml" -X POST -d "$newSite" | xmllint --xpath '/mobile_device_application/id/text()' -)
 		echo "$(date) Duplicate app record created with ID $jamfSetupID..." >> $logPath
+		duplicateAppRecordCreated=1
 	fi
 fi
 
@@ -1292,9 +1400,11 @@ appIDFormatted=$(echo $appID | xmllint --xpath '/mobile_device_application/id/te
 			rollback
 			
 			closingSelection=$(osascript << EOF
+			with timeout of 60000 seconds
 			tell application "System Events" to button returned of (display dialog "Due to an error the script has been cancelled.
 			
 			Click View Logs to view more information." with title "$JSCVersion" buttons {"Close","View Logs"} default button 1)
+			end timeout
 EOF
 )
 
@@ -1315,19 +1425,197 @@ echo "Everything has been successfully created! Enjoy your new Jamf Setup experi
 #Kill the jamf helper window that's telling the user to wait
 pkill jamfHelper
 
-closingSelection=$(osascript << EOF
-tell application "System Events" to button returned of (display dialog "All finished! Your Jamf Pro server should now be configured with the proper extension attribute and corresponding smart groups and app configuration!
+case $createDeconstructor in
+	"Yes")
+	#First save the names of the smart groups that were created into a variable to display as a message in the 
+		# deconstructor script
+		smartGroupNameSize="${#smartGroupNameArray[@]}"
+		smartGroupNameIndex=$(($smartGroupNameSize-1))
+		for i in $(seq 0 $smartGroupNameIndex); do
+			smartGroupNames="$smartGroupNames
+	${smartGroupNameArray[$i]}"
+			done
+		#Now write the script
+cat << FOE > ~/Desktop/JamfSetupDEconstructor.sh
+#!/bin/bash
 
-Note: You might not see everything that was created right away because of your browsers cache. If you do not see your extension attribute or smart groups, just wait a few minutes or clear your browser cache and refresh the page.
+logPath=$logPath
+#Prompt the user for what is about to happen
+openingSelection=\$(osascript << EOF
+with timeout of 60000 seconds
+tell application "System Events" to button returned of (display dialog "Welcome to the Jamf Setup DE-Constructor!
+This script was created after successfully finishing the Jamf Setup Constructor to give you the ability to delete what was created in case you need to try again or if you were just testing or creating a demo.
 
- For details on what all happened, you can find the logs at: 
-$logPath" with title "$JSCVersion" buttons {"Close","View Logs"} default button 1)
+This script will DELETE the smart groups and the extension attribute that were created the last time you ran the Jamf Setup Constructor script. Would you like to continue?" with title "Jamf Setup DE-Constructor" buttons {"Continue","Cancel"} default button 2)
+end timeout
+EOF
+)
+if [[ \$openingSelection == "Cancel" ]]; then
+	exit 0
+	fi
+
+echo "
+########################
+# JAMF SETUP DE-CONSTRUCTOR INITIATED
+########################" >> \$logPath
+
+#Establish Starting Variables
+
+smartGroupIDArray=()
+smartGroupIDArray=( ${sgIDarray[@]} )
+EAid="$EAidFormatted"
+EAName="$EAName"
+smartGroupIDSizeIndex=
+smartGroupNameArray=()
+smartGroupNames="$smartGroupNames"
+confirmation=0
+jamfProURL="$jamfProURL"
+duplicateAppRecordCreated=$duplicateAppRecordCreated
+jamfSetupID="$jamfSetupID"
+adminUser=\$(osascript << EOF
+with timeout of 60000 seconds
+tell application "System Events" to text returned of (display dialog "Please enter the username of an ADMIN for your Jamf Pro server at \$jamfProURL who has the ability to DELETE Mobile Device Groups and Extension Attributes" default answer "" with title "Jamf Setup DE-Constructor" buttons {"OK"} default button 1)
+end timeout
+EOF
+)
+adminPass=\$(osascript << EOF
+with timeout of 60000 seconds
+tell application "System Events" to text returned of (display dialog "Please enter the password for admin user \$adminUser for your Jamf Pro server at \$jamfProURL" default answer "" with title "Jamf Setup DE-Constructor" buttons {"OK"} default button 1 with hidden answer)
+end timeout
 EOF
 )
 
-if [[ $closingSelection == "View Logs" ]]; then
-	open -a TextEdit.app "$logPath"
+#Final Confirmation
+while [[ "\$confirmation" != "DELETE" ]]; do
+confirmation=\$(osascript << EOF
+with timeout of 60000 seconds
+tell application "System Events" to text returned of (display dialog "The following items will be deleted from your Jamf Pro server:
+
+EXTENSION ATTRIBUTE
+
+	\$EAName
+
+SMART GROUPS
+\$smartGroupNames
+
+Additionally, if you opted to use Sites, the duplicate Jamf Setup app record will be deleted.
+
+In order to proceed, please type the word DELETE into the box below.
+To cancel type CANCEL." default answer "" with title "Jamf Setup DE-Constructor" buttons {"Submit"} default button 1)
+end timeout
+EOF
+)
+if [[ \$confirmation == "CANCEL" ]]; then
+	echo "User canceled deconstructor session..." >> \$logpath
 	exit 0
-	else
-		exit 0
+	fi
+done
+
+#Bring up a Jamf Helper window to let them know it's working
+"/Library/Application Support/JAMF/bin/jamfHelper.app/Contents/MacOS/jamfHelper" -windowType utility -title "DE-Constructing..." -description "Please wait while we make some Jamf magic happen..." -alignDescription center &
+
+#Initiate Rollback
+echo "\$(date) The following items will be deleted from Jamf Pro:
+
+EXTENSION ATTRIBUTE
+
+	\$EAName
+
+SMART GROUPS
+\$smartGroupNames
+" >> \$logPath
+
+echo "\$(date) Rolling back what has been created..." >> \$logPath
+#Delete smart groups if they exist
+#Calculate how smart groups have been created
+smartGroupIDSize=\$(echo "\${#smartGroupIDArray[@]}")
+
+if [[ "\$smartGroupIDSize" > 0 ]]; then
+	smartGroupIDSizeIndex=\$((\$smartGroupIDSize-1))
+	echo "\$(date) \$smartGroupIDSize group(s) will be deleted..." >> \$logPath
+	
+	#Loop through and delete each smart group that was created
+	for i in \$(seq 0 \$smartGroupIDSizeIndex); do
+		curl -su \$adminUser:\$adminPass \$jamfProURL/JSSResource/mobiledevicegroups/id/\${smartGroupIDArray[\$i]} -X DELETE
+		echo "\$(date) Smart Group with ID \${smartGroupIDArray[\$i]} deleted..." >> \$logPath
+	done
 fi
+		
+#Delete the extension attribute if it exists
+curl -su \$adminUser:\$adminPass \$jamfProURL/JSSResource/mobiledeviceextensionattributes/id/\$EAid -X DELETE
+echo "\$(date) Extension attribute has been deleted..." >> \$logPath
+
+#If sites are configured, delete the duplicate app record created in the new site
+	if [[ "\$duplicateAppRecordCreated" == 1 ]]; then
+			#Delete the duplicate app record
+			curl -su \$adminUser:\$adminPass \$jamfProURL/JSSResource/mobiledeviceapplications/id/\$jamfSetupID -X DELETE
+			echo "\$(date) Duplicate app record with ID \$jamfSetupID deleted..." >> \$logPath
+		fi
+
+#Kill the jamf helper window that's telling the user to wait
+pkill jamfHelper
+
+finalButtonChoice=\$(osascript << EOF
+with timeout of 60000 seconds
+tell application "System Events" to button returned of (display dialog "Your items have been successfully deleted from Jamf Pro! You can view the same logs that were used from the Jamf Setup Constructor script located at:
+\$logPath" with title "Jamf Setup DE-Constructor" buttons {"Close","View Logs"} default button 1)
+end timeout
+EOF
+)
+if [[ "\$finalButtonChoice" == "View Logs" ]]; then
+	open -a TextEdit.app "\$logPath"
+	rm -f ~/Desktop/JamfSetupDEconstructor.sh
+	exit 0
+		else
+			rm -f ~/Desktop/JamfSetupDEconstructor.sh
+			exit 0
+	fi
+FOE
+	#Make the script executable for easier use 
+	chmod 755 ~/Desktop/JamfSetupDEconstructor.sh
+	
+	closingSelection=$(osascript << EOF
+	with timeout of 60000 seconds
+	tell application "System Events" to button returned of (display dialog "All finished! Your Jamf Pro server should now be configured with the proper extension attribute and corresponding smart groups and app configuration!
+
+Note: You might not see everything that was created right away because of your browsers cache. If you do not see your extension attribute or smart groups, just wait a few minutes or clear your browser cache and refresh the page.
+	
+Additionally, you opted to have the Jamf Setup DE-Constructor script created on your desktop. On your desktop you should now see a file called 
+JamfSetupDEconstructor.sh.
+If you decide you want to delete the smart groups and extension attribute created with this script, simply drag the file into a terminal window, hit enter, and follow the prompts.
+
+For details on what all happened, you can find the logs at: 
+$logPath" with title "$JSCVersion" buttons {"Close","View Logs"} default button 1)
+	end timeout
+EOF
+)
+		if [[ $closingSelection == "View Logs" ]]; then
+			open -a TextEdit.app "$logPath"
+			exit 0
+			else
+				exit 0
+		fi
+
+		;;
+	*)
+		closingSelection=$(osascript << EOF
+		with timeout of 60000 seconds
+		tell application "System Events" to button returned of (display dialog "All finished! Your Jamf Pro server should now be configured with the proper extension attribute and corresponding smart groups and app configuration!
+
+Note: You might not see everything that was created right away because of your browsers cache. If you do not see your extension attribute or smart groups, just wait a few minutes or clear your browser cache and refresh the page.
+
+For details on what all happened, you can find the logs at: 
+$logPath" with title "$JSCVersion" buttons {"Close","View Logs"} default button 1)
+		end timeout
+EOF
+		)
+
+		if [[ $closingSelection == "View Logs" ]]; then
+			open -a TextEdit.app "$logPath"
+			exit 0
+			else
+				exit 0
+		fi
+		;;
+esac
+
